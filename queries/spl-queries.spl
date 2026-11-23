@@ -1,0 +1,47 @@
+// Splunk BOTS v3 — SPL queries used
+// Always use earliest=0 — BOTS v3 data is from 20 Aug 2018.
+
+// Setup verification
+index=botsv3 earliest=0 | head 5
+
+// Sourcetypes in the dataset
+index=botsv3 earliest=0 | stats count by sourcetype | sort -count
+
+// --- Investigation 1: S3 bucket exposed ---
+// PutBucketAcl events (the ACL change)
+index=botsv3 earliest=0 sourcetype=aws:cloudtrail eventName=PutBucketAcl | table _time, userIdentity.userName, sourceIPAddress, requestParameters.bucketName, requestParameters.AccessControlPolicy.AccessControlList.Grant{}.Grantee.URI, requestParameters.AccessControlPolicy.AccessControlList.Grant{}.Permission
+
+// Timeline only
+index=botsv3 earliest=0 sourcetype=aws:cloudtrail eventName=PutBucketAcl | table _time, userIdentity.userName, eventName
+
+// CloudTrail events for the bucket
+index=botsv3 earliest=0 sourcetype=aws:cloudtrail frothlywebcode | table _time, user, eventName, errorCode | head 10
+
+// S3 access logs — raw text, no extracted fields
+index=botsv3 earliest=0 sourcetype=aws:s3:accesslogs frothlywebcode "GET.OBJECT" | head 5
+index=botsv3 earliest=0 sourcetype=aws:s3:accesslogs frothlywebcode NOT 107.77.212.175 | head 10
+
+// --- Investigation 2: Windows logons ---
+// Failed logons
+index=botsv3 earliest=0 sourcetype=wineventlog:security EventCode=4625 | stats count by Account_Name | sort -count | head 10
+// Successful logons
+index=botsv3 earliest=0 sourcetype=wineventlog:security EventCode=4624 | stats count by Account_Name | sort -count | head 10
+// Raw 4625 rows — note Source_Network_Address, not src_ip
+index=botsv3 earliest=0 sourcetype=wineventlog:security EventCode=4625 | table _time, host, Account_Name, Source_Network_Address, Logon_Type | head 10
+
+// --- Investigation 3: Network traffic ---
+// Top DNS queries
+index=botsv3 earliest=0 sourcetype=stream:dns | stats count by query | sort -count | head 10
+// Top talkers
+index=botsv3 earliest=0 sourcetype=stream:ip | stats count by src_ip | sort -count | head 10
+// Denied ASA connections (0 events in this dataset)
+index=botsv3 earliest=0 sourcetype=cisco:asa action=denied | stats count by src_ip, dest_ip | sort -count | head 10
+
+// --- Dead ends, kept for honesty ---
+// These returned no events — wrong field names, not missing data:
+// index=botsv3 earliest=0 EventCode=4625 | stats count by src_ip, Account_Name
+//   -> src_ip does not exist in BOTS v3; use Source_Network_Address
+// index=botsv3 earliest=0 sourcetype=access_combined* status=401
+//   -> no access_combined sourcetype; web logs are stream:http
+// index=botsv3 earliest=0 sourcetype=stream:http http_status=401
+//   -> http_status does not exist; the field is status, and there are no 401s
